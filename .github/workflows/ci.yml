@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Testes + cobertura (mínimo 85%)
+        run: npm run coverage
+        env:
+          SKIP_BUILD: '1'
+      - name: Smoke test do pacote (npx em diretório limpo)
+        run: |
+          npm pack --silent
+          mkdir -p /tmp/smoke && cd /tmp/smoke
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/sheet-cat-*.tgz
+          npx sheet-cat --version
+          npx sheet-cat convert "$GITHUB_WORKSPACE/tests/fixtures/clean.csv" --map vtex --out catalogo.json
+          test -s catalogo.json
+
+  memory:
+    name: benchmark de memória (100 mil linhas)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: CSV, 100 mil linhas, limite 300 MB
+        run: npm run bench -- --rows 100000 --limit 300
+      - name: CSV agrupando variações, limite 300 MB
+        run: node --import tsx benchmarks/large-file.bench.ts --rows 100000 --limit 300 --group
+      - name: XLSX, 100 mil linhas, limite 300 MB
+        run: node --import tsx benchmarks/large-file.bench.ts --rows 100000 --limit 300 --format xlsx
